@@ -2186,12 +2186,54 @@ function exitRetry() {
     refreshResults();   // bring the score report back — it persists until Reset quiz
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+/* ============================================================
+   SCROLL ANCHORING
+   Showing or hiding the learning objectives changes the height of every
+   question card at once, including the ones already scrolled past. The browser
+   keeps the same scroll offset, so the question you were reading slides away
+   under you. CSS scroll anchoring doesn't cover this reliably (Safari has none
+   at all), so the compensation is explicit: note where a reference block sits
+   relative to the viewport, make the change, then scroll by however far that
+   block moved.
+============================================================ */
+const BB_ANCHOR_SEL = '#quiz-root .section-divider, #quiz-root .question-text, ' +
+                      '#quiz-root .q-figure, #quiz-root .options-grid, #quiz-root .feedback';
+/* The block nearest the top of the viewport — the thing the reader is looking at.
+   Blocks are used rather than whole cards because the LO box sits inside the card,
+   so anchoring to the card itself would still let its contents slide. */
+function bbAnchorEl() {
+    // While every card is still below the fold nothing above it can move.
+    const first = document.querySelector('#quiz-root .question-card');
+    if (!first || first.getBoundingClientRect().top > 0) return null;
+    const els = document.querySelectorAll(BB_ANCHOR_SEL);
+    for (let i = 0; i < els.length; i++) {
+        const r = els[i].getBoundingClientRect();
+        if (!r.width && !r.height) continue;   // hidden (e.g. during a retry pass)
+        if (r.bottom > 0) return els[i];
+    }
+    return null;
+}
+function bbKeepAnchored(apply) {
+    const el = bbAnchorEl();
+    const before = el ? el.getBoundingClientRect().top : 0;
+    apply();
+    if (!el) return;
+    const shift = el.getBoundingClientRect().top - before;
+    if (!shift) return;
+    const root = document.documentElement;
+    const prev = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';   // html { scroll-behavior: smooth } would animate this
+    window.scrollBy(0, shift);
+    root.style.scrollBehavior = prev;
+}
 function toggleLOs() {
-    const on = !document.body.classList.contains('show-lo');
-    document.body.classList.toggle('show-lo', on);
-    const t = document.getElementById('lo-btn');
-    t.classList.toggle('on', on); t.setAttribute('aria-pressed', on ? 'true' : 'false');
-    localStorage.setItem(K.showLO, on ? 'true' : 'false');
+    bbKeepAnchored(function () {
+        const on = !document.body.classList.contains('show-lo');
+        document.body.classList.toggle('show-lo', on);
+        const t = document.getElementById('lo-btn');
+        t.classList.toggle('on', on); t.setAttribute('aria-pressed', on ? 'true' : 'false');
+        localStorage.setItem(K.showLO, on ? 'true' : 'false');
+    });
 }
 
 function updateProgress() {
@@ -3330,13 +3372,41 @@ bbApplyTypography();
 
         let isRevealed = false;
 
+        /* Same scroll-anchoring idea as the modern layout: revealing every learning
+           objective at once would otherwise shove the question you are reading down
+           the page. This document is its own iframe, so it needs its own copy. */
+        function bbcKeepAnchored(apply) {
+            const first = document.querySelector('#quiz-root .question-card');
+            const scrolled = first && first.getBoundingClientRect().top <= 0;
+            const els = scrolled ? document.querySelectorAll(
+                '#quiz-root .question-text, #quiz-root .q-figure, #quiz-root .options-grid, ' +
+                '#quiz-root .feedback, #quiz-root .section-header') : [];
+            let el = null;
+            for (let i = 0; i < els.length; i++) {
+                const r = els[i].getBoundingClientRect();
+                if ((r.width || r.height) && r.bottom > 0) { el = els[i]; break; }
+            }
+            const before = el ? el.getBoundingClientRect().top : 0;
+            apply();
+            if (!el) return;
+            const shift = el.getBoundingClientRect().top - before;
+            if (!shift) return;
+            const root = document.documentElement;
+            const prev = root.style.scrollBehavior;
+            root.style.scrollBehavior = 'auto';
+            window.scrollBy(0, shift);
+            root.style.scrollBehavior = prev;
+        }
         function toggleAllLOs() {
             isRevealed = !isRevealed;
             const btn = document.getElementById('reveal-all-btn');
             btn.textContent = isRevealed ? "Hide Learning Objectives" : "Show Learning Objectives";
             
-            document.querySelectorAll('.lo-box').forEach(box => {
-                box.style.display = isRevealed ? 'block' : 'none';
+            // keep the reader's place — see the modern layout's bbKeepAnchored
+            bbcKeepAnchored(function () {
+                document.querySelectorAll('.lo-box').forEach(box => {
+                    box.style.display = isRevealed ? 'block' : 'none';
+                });
             });
         }
 
